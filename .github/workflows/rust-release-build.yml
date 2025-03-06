@@ -7,7 +7,7 @@ on:
 jobs:
   bootstrap:
     name: 🥾 Bootstrap
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     outputs:
       date:    ${{ steps.step1.outputs.date }}
@@ -23,6 +23,8 @@ jobs:
 
       - name: 🔗 Checkout source code from github
         uses: actions/checkout@v3
+        with:
+          ref: rust_beta/release
           
       - name: 📅 Prepare the environment
         id: step1
@@ -38,7 +40,7 @@ jobs:
   build-linux:
     name: 🐧 Linux
     needs: bootstrap
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     continue-on-error: true
 
     outputs:
@@ -50,13 +52,14 @@ jobs:
     - name: 🔗 Checkout source code from github
       uses: actions/checkout@v3
       with:
+        ref: rust_beta/release
         token: ${{ secrets.PAT_ALL_REPO }}
         submodules: recursive
 
     - name: 🛤️ Setup the dotnet build environment
       uses: actions/setup-dotnet@v2
       with:
-        dotnet-version: 8.0.x
+        dotnet-version: 9.0.200
 
     - uses: dtolnay/rust-toolchain@stable
     - uses: ClementTsang/cargo-action@v0.0.3
@@ -113,13 +116,14 @@ jobs:
     - name: 🔗 Checkout source code from github
       uses: actions/checkout@v3
       with:
+        ref: rust_beta/release
         token: ${{ secrets.PAT_ALL_REPO }}
         submodules: recursive
 
     - name: 🛤️ Setup the dotnet build environment
       uses: actions/setup-dotnet@v2
       with:
-        dotnet-version: 8.0.x
+        dotnet-version: 9.0.200
 
     - uses: dtolnay/rust-toolchain@stable
     - uses: ClementTsang/cargo-action@v0.0.3
@@ -162,7 +166,7 @@ jobs:
   release-on-schedule:
     name: 💾 Rust (Release) Release
     needs: [ "bootstrap", "build-linux", "build-windows" ]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     # only release if triggered by the scheduler
     # or if manually triggered by a developer
@@ -190,14 +194,14 @@ jobs:
       working-directory: Release
 
     - name: 🏷️ Update release tag
-      uses: softprops/action-gh-release@d4e8205d7e959a9107da6396278b2f1f07af0f9b
+      uses: softprops/action-gh-release@a92196038060e0c673cf3ba5b98710dd716731df
       with:
         draft: false
         prerelease: true
         tag_name: rustbeta_release_build
         name: 'Rust (Release) Build — v${{ needs.bootstrap.outputs.version }}'
         body: |
-          This is a manually triggered development build of Carbon based on the `develop` branch.
+          This is a manually triggered development build of Carbon based on the `rust_beta/release` branch.
           This build is polished and production-ready, and is the equivalent of what's to come in the upcoming `production` branch.
 
           ### How to install
