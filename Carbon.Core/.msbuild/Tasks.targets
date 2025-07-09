@@ -58,7 +58,6 @@
 			<c_hooks>$(CarbonBaseDir)\carbon\managed\hooks</c_hooks>
 			<c_lib>$(CarbonBaseDir)\carbon\managed\lib</c_lib>
 			<c_modules>$(CarbonBaseDir)\carbon\managed\modules</c_modules>
-			<c_compiler>$(CarbonBaseDir)\carbon\compiler</c_compiler>
 
 			<c_plugins>$(CarbonBaseDir)\carbon\plugins</c_plugins>
 			<c_data>$(CarbonBaseDir)\carbon\data</c_data>
@@ -89,7 +88,14 @@
 			<FilesToClean Include="$(c_lib)\*.pdb" />
 		</ItemGroup>
 
-		<Message Text="[$(AssemblyName)] Cleanup carbon stuff from lib folder" Importance="high" />
+		<ItemGroup>
+			<FilesToCopy Include="@(ReferenceCopyLocalPaths)" />
+		</ItemGroup>
+		<Copy SourceFiles="@(FilesToCopy)"
+					DestinationFolder="$(c_lib)\%(RecursiveDir)"
+					SkipUnchangedFiles="true"
+					OverwriteReadOnlyFiles="true" />
+
 	</Target>
 
 	<!--
