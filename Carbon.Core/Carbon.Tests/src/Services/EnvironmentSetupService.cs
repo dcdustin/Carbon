@@ -38,6 +38,7 @@ internal class EnvironmentSetupService
 
 	public async ValueTask<ServerPaths> PrepareEnvironmentAsync(ServerSettings settings)
 	{
+		const string rustIdentity = "thetester";
 		_logger.LogInformation("Preparing environment in working directory: {WorkingDirectory}", _workingDirectory);
 
 		var rustDir = await PrepareServerAsync(settings.AppId, settings.Branch);
@@ -53,12 +54,41 @@ internal class EnvironmentSetupService
 		}
 
 		await CopyCarbonWorkspaceAsync(rustDir);
-		await PrepareRustConfigFilesAsync(rustDir, "thetester");
+		await CleanupServerState(rustDir, rustIdentity);
+		await PrepareRustConfigFilesAsync(rustDir, rustIdentity);
 
 		var rustExePath = Path.Combine(rustDir, RustDedicatedExecutable);
 		_logger.LogInformation("Using Rust executable: {RustExecutable}", rustExePath);
 
 		return new ServerPaths(rustDir, rustExePath);
+	}
+
+	private ValueTask CleanupServerState(string rustDir, string serverIdentity)
+	{
+		string[] paths =
+		[
+			Path.Combine(rustDir, "server", serverIdentity),
+			Path.Combine(rustDir, "carbon", "data"),
+		];
+
+		foreach (var path in paths)
+		{
+			if (!Path.Exists(path))
+			{
+				continue;
+			}
+
+			_logger.LogInformation("Cleaning up old files in {Folder}", path);
+
+			var dirInfo = new DirectoryInfo(path);
+			foreach (var fileInfo in dirInfo.GetFiles())
+			{
+				_logger.LogInformation("Deleting {FileName}", fileInfo.Name);
+				fileInfo.Delete();
+			}
+		}
+
+		return ValueTask.CompletedTask;
 	}
 
 	private async ValueTask<string> PrepareServerAsync(int appId, string branch)
@@ -83,36 +113,67 @@ internal class EnvironmentSetupService
 
 	private async ValueTask PrepareCarbonAsync(string rustDir, string carbonUrl)
 	{
-		_logger.LogInformation("Downloading Carbon from {CarbonUrl}", carbonUrl);
+		_logger.LogInformation("Preparing Carbon using: {CarbonUrl}", carbonUrl);
 
 		using (new TimedGroupLog("EnvironmentSetupService PrepareCarbon - Downloading and Unpacking Carbon"))
 		{
-			await using var memoryStream = new MemoryStream();
-			var response = await _httpClient.GetAsync(carbonUrl);
-			response.EnsureSuccessStatusCode();
-			await response.Content.CopyToAsync(memoryStream);
+			Stream sourceStream;
 
-			memoryStream.Position = 0;
-
-			Directory.CreateDirectory(rustDir);
-
-			_logger.LogInformation("Unpacking archive into {RustDir}", rustDir);
-
-			if (carbonUrl.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+			if (carbonUrl.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
 			{
-				await using var archive = new ZipArchive(memoryStream, ZipArchiveMode.Read);
-				await archive.ExtractToDirectoryAsync(rustDir, true);
-				_logger.LogInformation("Carbon .zip extracted to {Path}", rustDir);
-			}
-			else if (carbonUrl.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase))
-			{
-				await using var gzipStream = new GZipStream(memoryStream, CompressionMode.Decompress);
-				await TarFile.ExtractToDirectoryAsync(gzipStream, rustDir, true);
-				_logger.LogInformation("Carbon .tar.gz extracted to {Path}", rustDir);
+				try
+				{
+					var uri = new Uri(carbonUrl);
+					var localPath = uri.LocalPath;
+
+					_logger.LogInformation("Reading from local file: {LocalPath}", localPath);
+
+					sourceStream = new FileStream(localPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+				}
+				catch (UriFormatException ex)
+				{
+					_logger.LogError(ex, "Invalid file URI format: {Url}", carbonUrl);
+					throw;
+				}
 			}
 			else
 			{
-				throw new NotSupportedException($"Unsupported file format for URL: {carbonUrl}");
+				_logger.LogInformation("Downloading from: {Url}", carbonUrl);
+
+				var response = await _httpClient.GetAsync(carbonUrl);
+				response.EnsureSuccessStatusCode();
+
+				var memoryStream = new MemoryStream();
+				await response.Content.CopyToAsync(memoryStream);
+				memoryStream.Position = 0;
+				sourceStream = memoryStream;
+			}
+
+			try
+			{
+				Directory.CreateDirectory(rustDir);
+				_logger.LogInformation("Unpacking archive into {RustDir}", rustDir);
+
+				if (carbonUrl.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+				{
+					await using var archive = new ZipArchive(sourceStream, ZipArchiveMode.Read);
+					await archive.ExtractToDirectoryAsync(rustDir, true);
+					_logger.LogInformation("Carbon .zip extracted");
+				}
+				else if (carbonUrl.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase))
+				{
+					await using var gzipStream = new GZipStream(sourceStream, CompressionMode.Decompress);
+					await TarFile.ExtractToDirectoryAsync(gzipStream, rustDir, true);
+					_logger.LogInformation("Carbon .tar.gz extracted");
+				}
+				else
+				{
+					throw new NotSupportedException($"Unsupported file format: {carbonUrl}");
+				}
+			}
+			finally
+			{
+				await sourceStream.DisposeAsync();
 			}
 		}
 	}
